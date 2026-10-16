@@ -1,0 +1,145 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "dag_no": "101",
+        "estimated_area_pixel": 69629.5,
+        "status": "Verified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              90.322332,
+              23.874276
+            ],
+            [
+              90.322284,
+              23.872172
+            ],
+            [
+              90.324348,
+              23.872084
+            ],
+            [
+              90.324436,
+              23.874188
+            ],
+            [
+              90.322332,
+              23.874276
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dag_no": "102",
+        "estimated_area_pixel": 56955.0,
+        "status": "Disputed (Over-mutation)"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              90.320492,
+              23.874356
+            ],
+            [
+              90.320564,
+              23.872252
+            ],
+            [
+              90.322188,
+              23.872164
+            ],
+            [
+              90.322276,
+              23.874268
+            ],
+            [
+              90.320492,
+              23.874356
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dag_no": "103",
+        "estimated_area_pixel": 57048.0,
+        "status": "Verified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              90.322404,
+              23.876108
+            ],
+            [
+              90.322332,
+              23.874404
+            ],
+            [
+              90.324436,
+              23.874332
+            ],
+            [
+              90.324508,
+              23.876036
+            ],
+            [
+              90.322404,
+              23.876108
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dag_no": "104",
+        "estimated_area_pixel": 48359.0,
+        "status": "Verified"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              90.320484,
+              23.876108
+            ],
+            [
+              90.320492,
+              23.874484
+            ],
+            [
+              90.322276,
+              23.874412
+            ],
+            [
+              90.322348,
+              23.876116
+            ],
+            [
+              90.320484,
+              23.876108
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}
