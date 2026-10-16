@@ -14,7 +14,7 @@ import {
   PhoneCall,
 } from "lucide-react";
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "https://bhumi-prohori.onrender.com";
 
 export default function App() {
   const [geoData, setGeoData] = useState(null);
