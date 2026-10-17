@@ -102,7 +102,7 @@ KHATIAN_DATABASE = {
             {"stage": "RS (১৯৮০)", "owner": "সুলতান মাহমুদ", "area": "১৫ শতাংশ"},
             {"stage": "BS (বর্তমান)", "owner": "রফিকুল ইসলাম গং (জাল খতিয়ান সন্দেহ)", "area": "২২ শতাংশ"}
         ],
-        "message_bn": "সতর্কতা! আরএস খতিয়ানে মোট জমি ছিল ১৫ শতাংশ, কিন্তু বর্তমান বিএস খতিয়ানে ২২ শতাংশ নামজারি করা হয়েছে।"
+        "message_bn": "সতর্কতা! আরএস খতিয়ানে মোট জমি ছিল ১৫ শতাংশ, কিন্তু বর্তমান বিএস খতিয়ানে ২২ শতাংশ নামজারি করা হয়েছে। এখানে ৭ শতাংশ জমির জালিয়াতি শনাক্ত হয়েছে!"
     },
     "103": {
         "dag_no": "১০৩",
@@ -119,6 +119,7 @@ KHATIAN_DATABASE = {
         "lng": 90.3215,
         "lineage": [
             {"stage": "CS (১৯৪০)", "owner": "আফসার উদ্দিন", "area": "৩০ শতাংশ"},
+            {"stage": "SA (১৯৬২)", "owner": "হাবিবুর রহমান", "area": "৩০ শতাংশ"},
             {"stage": "RS (১৯৮০)", "owner": "হাবিবুর রহমান", "area": "৩০ শতাংশ"},
             {"stage": "BS (বর্তমান)", "owner": "মিসেস সালমা বেগম", "area": "৩০ শতাংশ"}
         ],
@@ -139,6 +140,7 @@ KHATIAN_DATABASE = {
         "lng": 90.3235,
         "lineage": [
             {"stage": "CS (১৯৪০)", "owner": "জব্বার আলী", "area": "১২.৫০ শতাংশ"},
+            {"stage": "SA (১৯৬২)", "owner": "আনোয়ার হোসেন", "area": "১২.৫০ শতাংশ"},
             {"stage": "RS (১৯৮০)", "owner": "আনোয়ার হোসেন", "area": "১২.৫০ শতাংশ"},
             {"stage": "BS (বর্তমান)", "owner": "ক্যাপ্টেন ডেভেলপার্স লিঃ", "area": "১২.৫০ শতাংশ"}
         ],
@@ -184,19 +186,15 @@ async def scan_khatian_image(file: UploadFile = File(...)):
         client = genai.Client(api_key=api_key.strip())
         img = Image.open(io.BytesIO(contents))
 
-        prompt_lines = [
-            "You are an expert Bangladeshi Land Khatian (CS/SA/RS/BS Porcha) OCR and Geospatial Engine.",
-            "Carefully read the uploaded Khatian image and extract the exact Bengali text and numbers visible:",
-            "1. Khatian type and number (e.g., আর এস খতিয়ান নং- ৩২০).",
-            "2. District, Upazila, Mouza, and JL No (e.g., উত্তর মুকসেদপুর, বদরগঞ্জ, রংপুর, জে.এল নং: ১৩).",
-            "3. Owner name, father/husband name, and address (e.g., দং ছাহেরা খাতুন, জং জহির উদ্দীন).",
-            "4. ALL Dag numbers in column 4 separated by commas (e.g., ২৬১৩, ২৬১৭, ২৮৯৯, ২৯২০, ২৯২১, ২৯২২, ২৯৩০, ২৯৬১, ৩০২৪).",
-            "5. Total land area at the bottom (e.g., ৭ একর ০১ শতক).",
-            "6. Geocode the Mouza/Upazila/District in Bangladesh to accurate GPS latitude ('lat') and longitude ('lng') floats (e.g., Badarganj, Rangpur is lat: 25.6738, lng: 89.0558).",
-            "7. In 'lineage', list each Dag number, land class (দলা/ডাঙ্গা), share, and area.",
-            "Return ONLY a valid JSON object with keys: dag_no, mouza, jl_no, khatian_no, total_area, recorded_area, status ('Verified'), status_bn, risk_score, current_owner, lat (float), lng (float), lineage (array of {stage, owner, area}), message_bn."
-        ]
-        prompt = "\n".join(prompt_lines)
+        prompt = (
+            "You are an expert Bangladeshi Land Khatian OCR and Geospatial Engine. "
+            "Extract Khatian type/number, district, upazila, mouza, JL no, owner name, "
+            "all Dag numbers in column 4 separated by commas, total land area at the bottom, "
+            "and geocode the location to accurate lat/lng floats (e.g., Badarganj, Rangpur is lat: 25.6738, lng: 89.0558). "
+            "Return ONLY a valid JSON object with keys: dag_no, mouza, jl_no, khatian_no, total_area, "
+            "recorded_area, status ('Verified'), status_bn, risk_score, current_owner, lat (float), lng (float), "
+            "lineage (array of {stage, owner, area}), message_bn."
+        )
 
         response = client.models.generate_content(
             model="gemini-2.5-flash",
@@ -225,7 +223,7 @@ async def scan_khatian_image(file: UploadFile = File(...)):
         parsed["dynamic_geojson"] = build_dynamic_geojson(lat, lng, dag_str, mouza_str, is_safe)
         return parsed
 
-except Exception as e:
+    except Exception as e:
         print(f"CRITICAL GEMINI ERROR: {str(e)}")
         return {
             "dag_no": "স্ক্যান ত্রুটি",
