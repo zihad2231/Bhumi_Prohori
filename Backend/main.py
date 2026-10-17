@@ -225,22 +225,22 @@ async def scan_khatian_image(file: UploadFile = File(...)):
         parsed["dynamic_geojson"] = build_dynamic_geojson(lat, lng, dag_str, mouza_str, is_safe)
         return parsed
 
-   except Exception as e:
+except Exception as e:
         print(f"CRITICAL GEMINI ERROR: {str(e)}")
         return {
-            "dag_no": f"Error: {str(e)[:30]}",
-            "mouza": "API Error Catch",
+            "dag_no": "স্ক্যান ত্রুটি",
+            "mouza": "পুনরায় চেষ্টা করুন",
             "jl_no": "-",
-            "khatian_no": "Error",
+            "khatian_no": f"Error: {str(e)[:30]}",
             "total_area": "০ শতাংশ",
             "recorded_area": "০ শতাংশ",
             "status": "Disputed",
-            "status_bn": f"Technical Error: {str(e)[:50]}",
-            "risk_score": "Error",
-            "current_owner": "Console Check Korun",
+            "status_bn": "এআই প্রসেসিং ত্রুটি ঘটেছে",
+            "risk_score": "ত্রুটি",
+            "current_owner": "লগ চেক করুন",
             "lat": 23.8745,
             "lng": 90.3225,
             "lineage": [],
-            "message_bn": "Gemini API call korte giye error asheche. Kripya Render console logs check korun.",
+            "message_bn": f"টেকনিক্যাল ত্রুটি: {str(e)[:80]}",
             "is_scanned": True
         }
