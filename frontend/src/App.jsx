@@ -18,7 +18,6 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-// Fix Leaflet default marker icon issue in Vite/React
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
@@ -26,10 +25,8 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-// Reads from .env / Vercel Environment Variable if set, otherwise uses Render backend URL
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://bhumi-prohori.onrender.com";
 
-// Coordinates for each plot to fly smoothly when selected
 const PLOT_COORDS = {
   "101": [23.8755, 90.3215],
   "102": [23.8755, 90.3235],
@@ -37,7 +34,6 @@ const PLOT_COORDS = {
   "104": [23.8735, 90.3235],
 };
 
-// Component to fix half-grey map rendering & smoothly fly to target coordinates
 function MapController({ center, zoom }) {
   const map = useMap();
 
@@ -49,9 +45,9 @@ function MapController({ center, zoom }) {
   }, [map]);
 
   useEffect(() => {
-    if (center) {
+    if (center && center.length === 2) {
       map.invalidateSize();
-      map.flyTo(center, zoom, { duration: 1.2 });
+      map.flyTo(center, zoom, { duration: 1.5 });
     }
   }, [center, zoom, map]);
 
@@ -59,7 +55,8 @@ function MapController({ center, zoom }) {
 }
 
 export default function App() {
-  const [geoData, setGeoData] = useState(null);
+  const [defaultGeoData, setDefaultGeoData] = useState(null);
+  const [activeGeoData, setActiveGeoData] = useState(null);
   const [showOverlay, setShowOverlay] = useState(true);
   const [mapType, setMapType] = useState("hybrid");
   const [selectedDag, setSelectedDag] = useState("101");
@@ -71,22 +68,26 @@ export default function App() {
   const [mapZoom, setMapZoom] = useState(17);
   const [userGps, setUserGps] = useState(null);
 
-  // Load GeoJSON Mouza Map on startup
   useEffect(() => {
     fetch(`${API_BASE}/api/mouza-map`)
       .then((res) => res.json())
-      .then((data) => setGeoData(data))
+      .then((data) => {
+        setDefaultGeoData(data);
+        setActiveGeoData(data);
+      })
       .catch(() => {});
   }, []);
 
-  // Load predefined plot info ONLY when user clicks a plot button
   const handleSelectPredefinedDag = (dagId) => {
     setIsCustomScan(false);
     setUploadedPreview(null);
     setSelectedDag(dagId);
+    if (defaultGeoData) {
+      setActiveGeoData(defaultGeoData);
+    }
     if (PLOT_COORDS[dagId]) {
       setMapCenter(PLOT_COORDS[dagId]);
-      setMapZoom(18);
+      setMapZoom(17);
     }
 
     setLoading(true);
@@ -101,12 +102,11 @@ export default function App() {
       });
   };
 
-  // Load Dag 101 once on initial startup
   useEffect(() => {
     handleSelectPredefinedDag("101");
   }, []);
 
-  // Handle Khatian Image Upload for Real AI OCR Scan
+  // Upload Khatian Image -> Extract Real Info -> Track Location on Satellite Map
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -126,6 +126,17 @@ export default function App() {
       });
       const data = await res.json();
       setKhatianInfo(data);
+
+      // Automatically fly Satellite Map to the extracted Mouza GPS coordinates!
+      if (data.lat && data.lng) {
+        setMapCenter([Number(data.lat), Number(data.lng)]);
+        setMapZoom(17);
+      }
+
+      // Render dynamic plot boundaries for all extracted Dag numbers on the map
+      if (data.dynamic_geojson) {
+        setActiveGeoData(data.dynamic_geojson);
+      }
     } catch {
       alert("সার্ভারের সাথে সংযোগ করা যাচ্ছে না। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।");
     } finally {
@@ -134,7 +145,6 @@ export default function App() {
     }
   };
 
-  // Live GPS Tracking on Satellite Map
   const handleLocateMe = () => {
     if (!navigator.geolocation) {
       alert("আপনার ব্রাউজারে জিপিএস (Geolocation) সাপোর্ট করছে না।");
@@ -154,31 +164,40 @@ export default function App() {
   };
 
   const plotStyle = (feature) => {
-    const isDisputed = feature.properties.dag_no === "102";
+    const isDisputed =
+      feature.properties.dag_no === "102" || feature.properties.status === "Disputed";
     const isSelected = !isCustomScan && feature.properties.dag_no === selectedDag;
     return {
       fillColor: isDisputed ? "#ef4444" : "#10b981",
-      weight: isSelected ? 4 : 2,
+      weight: isCustomScan || isSelected ? 3 : 2,
       opacity: 1,
-      color: isSelected ? "#fbbf24" : "#ffffff",
-      fillOpacity: isSelected ? 0.65 : 0.4,
+      color: isCustomScan || isSelected ? "#fbbf24" : "#ffffff",
+      fillOpacity: 0.55,
     };
   };
 
   const onEachPlot = (feature, layer) => {
     const dag = feature.properties.dag_no;
-    let bnDag = "১০৪";
-    if (dag === "101") bnDag = "১০১";
-    if (dag === "102") bnDag = "১০২ (ঝুঁকিপূর্ণ)";
-    if (dag === "103") bnDag = "১০৩";
+    let label = `দাগ নং: ${dag}`;
+    if (!isCustomScan) {
+      if (dag === "101") label = "দাগ নং: ১০১";
+      if (dag === "102") label = "দাগ নং: ১০২ (ঝুঁকিপূর্ণ)";
+      if (dag === "103") label = "দাগ নং: ১০৩";
+      if (dag === "104") label = "দাগ নং: ১০৪";
+    }
 
-    layer.bindTooltip(`দাগ নং: ${bnDag}`, {
+    layer.bindTooltip(label, {
       permanent: true,
       direction: "center",
       className: "leaflet-tooltip-own",
     });
+
     layer.on({
-      click: () => handleSelectPredefinedDag(dag),
+      click: () => {
+        if (!isCustomScan) {
+          handleSelectPredefinedDag(dag);
+        }
+      },
     });
   };
 
@@ -230,9 +249,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs md:text-sm text-emerald-950 font-semibold">
           <div className="flex flex-wrap items-center gap-3">
             <span className="bg-emerald-700 text-white px-2.5 py-0.5 rounded-md font-bold">সহজ নির্দেশনা:</span>
-            <span>১. যেকোনো খতিয়ানের ছবি আপলোড করুন অথবা নিচের দাগ নম্বরে ক্লিক করুন</span>
-            <span>•</span>
-            <span>২. ডান পাশে এআই (AI) যাচাইকৃত রিপোর্ট ও জমির সীমানা দেখুন</span>
+            <span>১. যেকোনো খতিয়ানের ছবি আপলোড করলে এআই স্বয়ংক্রিয়ভাবে মৌজা ও দাগ নম্বর শনাক্ত করে স্যাটেলাইট ম্যাপে ট্র্যাক করবে</span>
           </div>
           <span className="text-emerald-800 font-bold flex items-center gap-1">
             <PhoneCall className="w-3.5 h-3.5" /> ভূমি সহায়তা হটলাইন: ১৬১২২
@@ -245,7 +262,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 py-3.5 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className="font-bold text-slate-800 flex items-center gap-1.5 text-base">
-              <Search className="w-5 h-5 text-emerald-600" /> নমুনা দাগ নম্বর বেছে নিন:
+              <Search className="w-5 h-5 text-emerald-600" /> নমুনা দাগ নম্বর:
             </span>
             {[
               { id: "101", label: "দাগ নং ১০১ (নিরাপদ)" },
@@ -269,7 +286,6 @@ export default function App() {
             ))}
           </div>
 
-          {/* Interactive Map Controls */}
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={handleLocateMe}
@@ -297,17 +313,18 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main Grid */}
+      {/* Main Content */}
       <main className="max-w-7xl mx-auto w-full px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
-        {/* Left Column: Satellite Map */}
+        {/* Left Column: Dynamic Satellite Map */}
         <div className="lg:col-span-7 bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden flex flex-col">
           <div className="p-4 bg-slate-900 text-white flex flex-wrap justify-between items-center gap-2">
             <div>
               <h2 className="font-bold text-lg flex items-center gap-2">
-                <MapPin className="w-5 h-5 text-emerald-400" /> লাইভ স্যাটেলাইট ও মৌজা ম্যাপ ট্র্যাকার
+                <MapPin className="w-5 h-5 text-emerald-400" />
+                স্যাটেলাইট ও মৌজা ম্যাপ ভিউ ({khatianInfo?.mouza || "আশুলিয়া মৌজা"})
               </h2>
               <p className="text-xs text-slate-300">
-                ম্যাপের যেকোনো দাগে ক্লিক করলে অথবা জুম করলে রিয়েল-টাইম স্যাটেলাইট ভিউ দেখা যাবে
+                খতিয়ান আপলোড করলে স্বয়ংক্রিয়ভাবে সংশ্লিষ্ট জেলা ও মৌজার স্যাটেলাইট ভিউ ট্র্যাক করা হয়
               </p>
             </div>
             <div className="flex gap-3 text-xs font-bold bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
@@ -320,7 +337,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="w-full relative z-0" style={{ height: "520px", minHeight: "520px" }}>
+          <div className="w-full relative z-0" style={{ height: "540px", minHeight: "540px" }}>
             <MapContainer
               center={mapCenter}
               zoom={mapZoom}
@@ -343,13 +360,25 @@ export default function App() {
                 />
               )}
 
-              {showOverlay && geoData && (
+              {showOverlay && activeGeoData && (
                 <GeoJSON
-                  key={`${selectedDag}-${isCustomScan}`}
-                  data={geoData}
+                  key={JSON.stringify(activeGeoData) + selectedDag + isCustomScan}
+                  data={activeGeoData}
                   style={plotStyle}
                   onEachFeature={onEachPlot}
                 />
+              )}
+
+              {isCustomScan && khatianInfo?.lat && khatianInfo?.lng && (
+                <Marker position={[Number(khatianInfo.lat), Number(khatianInfo.lng)]}>
+                  <Popup>
+                    <strong>মৌজা: {khatianInfo.mouza}</strong>
+                    <br />
+                    খতিয়ান নং: {khatianInfo.khatian_no}
+                    <br />
+                    দাগ নং: {khatianInfo.dag_no}
+                  </Popup>
+                </Marker>
               )}
 
               {userGps && (
@@ -362,16 +391,13 @@ export default function App() {
 
           <div className="p-3 bg-slate-50 border-t text-xs text-slate-600 flex flex-wrap justify-between items-center gap-2">
             <span>
-              <strong>এআই প্রযুক্তি:</strong> OpenCV ও Google Hybrid Satellite দিয়ে মৌজা ম্যাপের সীমানা ওভারলে করা হয়েছে।
+              <strong>জিপিএস কোঅর্ডিনেট:</strong> {mapCenter[0].toFixed(4)}° N, {mapCenter[1].toFixed(4)}° E
             </span>
             <button
-              onClick={() => {
-                setMapCenter([23.8745, 90.3225]);
-                setMapZoom(17);
-              }}
+              onClick={() => handleSelectPredefinedDag("101")}
               className="font-bold text-emerald-700 hover:underline flex items-center gap-1"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> ম্যাপ রিসেট করুন
+              <RefreshCw className="w-3.5 h-3.5" /> ডিফল্ট মৌজায় ফিরুন
             </button>
           </div>
         </div>
@@ -379,13 +405,13 @@ export default function App() {
         {/* Right Column: AI Khatian Verification Report */}
         <div className="lg:col-span-5 flex flex-col gap-5">
           {loading || !khatianInfo ? (
-            <div className="bg-white p-10 rounded-2xl shadow text-center border border-emerald-200 flex flex-col items-center justify-center gap-3 min-h-[320px]">
+            <div className="bg-white p-10 rounded-2xl shadow text-center border border-emerald-200 flex flex-col items-center justify-center gap-3 min-h-[340px]">
               <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
               <p className="text-xl font-bold text-emerald-800 animate-pulse">
-                অনুগ্রহ করে অপেক্ষা করুন, এআই (AI) আপনার খতিয়ান স্ক্যান ও যাচাই করছে...
+                এআই (AI) আপনার খতিয়ান স্ক্যান করছে এবং স্যাটেলাইট ম্যাপে মৌজাটি খুঁজছে...
               </p>
               <p className="text-xs text-slate-500">
-                ছবির রেজোলিউশন অনুযায়ী ৩-৫ সেকেন্ড সময় লাগতে পারে
+                সকল দাগ নম্বর, মালিকের নাম ও জমির পরিমাণ বিশ্লেষণ করা হচ্ছে (৩-৬ সেকেন্ড)
               </p>
             </div>
           ) : (
@@ -400,10 +426,10 @@ export default function App() {
                     />
                     <div>
                       <span className="text-xs bg-amber-400 text-slate-950 font-extrabold px-2.5 py-0.5 rounded-full">
-                        লাইভ এআই ওসিআর স্ক্যান (Live OCR)
+                        লাইভ এআই ওসিআর ও স্যাটেলাইট ট্র্যাকিং
                       </span>
                       <h4 className="font-extrabold text-sm text-slate-900 mt-1">
-                        আপনার আপলোডকৃত খতিয়ানের ফলাফল নিচে দেওয়া হলো
+                        মৌজা: {khatianInfo.mouza} {khatianInfo.jl_no ? `(জে.এল নং: ${khatianInfo.jl_no})` : ""}
                       </h4>
                     </div>
                   </div>
@@ -437,7 +463,7 @@ export default function App() {
                       </span>
                       <span className="text-xs font-bold">ঝুঁকি: {khatianInfo.risk_score}</span>
                     </div>
-                    <h3 className="text-2xl font-extrabold mt-1.5">{khatianInfo.status_bn}</h3>
+                    <h3 className="text-xl md:text-2xl font-extrabold mt-1.5">{khatianInfo.status_bn}</h3>
                     <p className="text-sm mt-2 font-medium leading-relaxed bg-white/80 p-2.5 rounded-lg border border-black/5">
                       {khatianInfo.message_bn}
                     </p>
@@ -460,10 +486,13 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <p className="text-slate-500 text-xs font-medium">দাগ ও মৌজা</p>
-                    <p className="font-extrabold text-base text-slate-900 mt-0.5">
-                      দাগ নং {khatianInfo.dag_no} ({khatianInfo.mouza})
+                  <div className="col-span-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <p className="text-slate-500 text-xs font-medium">মৌজা ও অন্তর্ভুক্ত দাগ নম্বরসমূহ</p>
+                    <p className="font-extrabold text-sm md:text-base text-slate-900 mt-0.5">
+                      দাগ নং: {khatianInfo.dag_no}
+                    </p>
+                    <p className="text-xs text-emerald-700 font-bold mt-0.5">
+                      মৌজা: {khatianInfo.mouza} {khatianInfo.jl_no ? `| জে.এল নং: ${khatianInfo.jl_no}` : ""}
                     </p>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
@@ -473,88 +502,50 @@ export default function App() {
                     </p>
                   </div>
                   <div className="bg-emerald-50/60 p-3 rounded-xl border border-emerald-200">
-                    <p className="text-emerald-800 text-xs font-semibold">মোট জমির পরিমাণ</p>
+                    <p className="text-emerald-800 text-xs font-semibold">সর্বমোট জমির পরিমাণ</p>
                     <p className="font-extrabold text-base text-emerald-700 mt-0.5">
                       {khatianInfo.total_area}
-                    </p>
-                  </div>
-                  <div
-                    className={`p-3 rounded-xl border ${
-                      isSafe ? "bg-slate-50 border-slate-200" : "bg-red-50 border-red-300"
-                    }`}
-                  >
-                    <p className="text-slate-600 text-xs font-semibold">রেকর্ডকৃত জমি</p>
-                    <p
-                      className={`font-extrabold text-base mt-0.5 ${
-                        isSafe ? "text-slate-900" : "text-red-600"
-                      }`}
-                    >
-                      {khatianInfo.recorded_area}
                     </p>
                   </div>
                 </div>
 
                 <div className="mt-3.5 bg-slate-100 p-3 rounded-xl flex justify-between items-center border border-slate-200">
                   <span className="text-sm font-medium text-slate-600">
-                    বর্তমান মালিক:{" "}
+                    মালিকের নাম:{" "}
                     <strong className="text-slate-900 font-extrabold">
                       {khatianInfo.current_owner}
                     </strong>
                   </span>
-                  <span className="flex items-center gap-1 text-xs font-bold text-emerald-700">
-                    <CheckCircle2 className="w-4 h-4" /> এআই যাচাইকৃত
+                  <span className="flex items-center gap-1 text-xs font-bold text-emerald-700 shrink-0">
+                    <CheckCircle2 className="w-4 h-4" /> যাচাইকৃত
                   </span>
                 </div>
               </div>
 
-              {/* Lineage History Card */}
+              {/* Plot-by-Plot Breakdown / Lineage Card */}
               {lineageList.length > 0 && (
                 <div className="bg-white p-5 rounded-2xl shadow-md border border-slate-200">
                   <h4 className="font-extrabold text-lg border-b pb-2.5 mb-4 flex items-center gap-2 text-slate-800">
-                    <GitBranch className="w-5 h-5 text-emerald-600" /> মালিকানার ধারাবাহিক ইতিহাস (Lineage)
+                    <GitBranch className="w-5 h-5 text-emerald-600" />
+                    {isCustomScan ? "খতিয়ানের দাগভিত্তিক জমির বিবরণ" : "মালিকানার ধারাবাহিক ইতিহাস (Lineage)"}
                   </h4>
-                  <div className="space-y-3 relative before:absolute before:inset-0 before:left-3.5 before:w-0.5 before:bg-emerald-200">
-                    {lineageList.map((item, idx) => {
-                      const isLastDisputed = !isSafe && idx === lineageList.length - 1;
-                      return (
-                        <div key={idx} className="relative flex items-center gap-4 pl-8">
-                          <span
-                            className={`w-4 h-4 rounded-full absolute left-1.5 border-2 border-white shadow ${
-                              isLastDisputed ? "bg-red-600" : "bg-emerald-600"
-                            }`}
-                          ></span>
-                          <div
-                            className={`flex-1 p-3 rounded-xl border flex justify-between items-center ${
-                              isLastDisputed
-                                ? "bg-red-50 border-red-300"
-                                : "bg-slate-50 border-slate-200"
-                            }`}
-                          >
-                            <div>
-                              <span
-                                className={`text-xs font-extrabold px-2 py-0.5 rounded ${
-                                  isLastDisputed
-                                    ? "bg-red-200 text-red-900"
-                                    : "bg-emerald-100 text-emerald-800"
-                                }`}
-                              >
-                                {item.stage}
-                              </span>
-                              <p className="font-bold text-sm text-slate-900 mt-1">{item.owner}</p>
-                            </div>
-                            <span
-                              className={`text-sm font-extrabold px-3 py-1 rounded-lg border ${
-                                isLastDisputed
-                                  ? "bg-red-600 text-white border-red-700"
-                                  : "bg-white text-slate-800 border-slate-200"
-                              }`}
-                            >
-                              {item.area}
-                            </span>
-                          </div>
+                  <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
+                    {lineageList.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3 rounded-xl border bg-slate-50 border-slate-200 flex justify-between items-center"
+                      >
+                        <div>
+                          <span className="text-xs font-extrabold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                            {item.stage}
+                          </span>
+                          <p className="font-bold text-sm text-slate-900 mt-1">{item.owner}</p>
                         </div>
-                      );
-                    })}
+                        <span className="text-sm font-extrabold px-3 py-1 rounded-lg border bg-white text-slate-800 border-slate-200 shrink-0">
+                          {item.area}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
