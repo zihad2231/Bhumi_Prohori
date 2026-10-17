@@ -65,6 +65,7 @@ def _lookup_mouza_location(query):
         }
 
     except Exception:
+        print(f"MOUZA LOCATION ERROR: {type(error).__name__}: {error}")
         return None
 
 
