@@ -1,9 +1,8 @@
 fastapi
-uvicorn
+uvicorn[standard]
+python-multipart
 python-dotenv
 Pillow
-requests
-google-generativeai
-shapely
-geopandas
+google-genai
 opencv-python-headless
+numpy
