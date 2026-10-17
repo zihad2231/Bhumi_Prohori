@@ -104,7 +104,9 @@ export default function App() {
     }
     if (PLOT_COORDS[dagId]) {
       setMapCenter(PLOT_COORDS[dagId]);
-      setMapZoom(17);
+      setMapZoom(
+  data.location_precision === "approximate" ? 14 : 17
+);
     }
 
     setLoading(true);
@@ -171,7 +173,9 @@ export default function App() {
       ) {
         const coords = [Number(data.lat), Number(data.lng)];
         setMapCenter(coords);
-        setMapZoom(17);
+        setMapZoom(
+  data.location_precision === "approximate" ? 14 : 17
+);
         setSelectedLocation(coords);
         setLatitudeInput(coords[0].toFixed(7));
         setLongitudeInput(coords[1].toFixed(7));
@@ -252,14 +256,17 @@ export default function App() {
     setMapZoom(18);
   };
 
-  const handleMapLocationSelect = (lat, lng) => {
-    const coords = [lat, lng];
-    setSelectedLocation(coords);
-    setLatitudeInput(lat.toFixed(7));
-    setLongitudeInput(lng.toFixed(7));
-    setCoordinateError("");
-    setMapCenter(coords);
-  };
+ 
+const handleMapLocationSelect = (lat, lng) => {
+  const coords = [lat, lng];
+
+  setSelectedLocation(coords);
+  setLatitudeInput(lat.toFixed(7));
+  setLongitudeInput(lng.toFixed(7));
+  setCoordinateError("");
+  setMapCenter(coords);
+  setMapZoom(18);
+};
 
   const plotStyle = (feature) => {
     const isDisputed =
@@ -512,7 +519,11 @@ export default function App() {
                     <br />
                     খতিয়ান নং: {khatianInfo.khatian_no || "ছবিতে শনাক্ত হয়নি"}
                     <br />
-                    দাগ নং: {khatianInfo.dag_no || "ছবিতে শনাক্ত হয়নি"}
+                    দাগ নং: {
+  khatianInfo.dag_numbers?.length
+    ? khatianInfo.dag_numbers.join(", ")
+    : khatianInfo.dag_no || "ছবিতে শনাক্ত হয়নি"
+}
                   </Popup>
                 </Marker>
               )}

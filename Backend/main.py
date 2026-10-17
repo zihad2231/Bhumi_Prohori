@@ -6,6 +6,10 @@ import io
 import json
 import os
 import re
+import asyncio
+from functools import lru_cache
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 load_dotenv()
 
@@ -24,6 +28,59 @@ app.add_middleware(
 def empty_geojson():
     """No official cadastral geometry is available yet."""
     return {"type": "FeatureCollection", "features": []}
+
+
+def _lookup_mouza_location(query):
+    if not query:
+        return None
+
+    params = urlencode({
+        "q": query,
+        "format": "jsonv2",
+        "limit": 1,
+        "countrycodes": "bd"
+    })
+
+    url = f"https://nominatim.openstreetmap.org/search?{params}"
+    request = Request(
+        url,
+        headers={"User-Agent": "BhumiProhori/1.0"}
+    )
+
+    try:
+        with urlopen(request, timeout=6) as response:
+            results = json.loads(response.read().decode("utf-8"))
+
+        if not results:
+            return None
+
+        result = results[0]
+
+        return {
+            "lat": float(result["lat"]),
+            "lng": float(result["lon"]),
+            "location_precision": "approximate",
+            "location_source": "OpenStreetMap geocoding",
+            "location_label": result.get("display_name")
+        }
+
+    except Exception:
+        return None
+
+
+async def lookup_mouza_location(mouza, upazila=None, district=None):
+    parts = [
+        part.strip()
+        for part in [mouza, upazila, district, "Bangladesh"]
+        if isinstance(part, str) and part.strip()
+    ]
+
+    if not mouza or not mouza.strip():
+        return None
+
+    query = ", ".join(parts)
+    return await asyncio.to_thread(_lookup_mouza_location, query)
+
 
 
 @app.get("/")
@@ -112,11 +169,12 @@ You are an OCR assistant for Bangladeshi land Khatian/Porcha documents.
 Read only text that is visible in the uploaded image. Do not invent or infer
 missing values, owner names, area, historical ownership, legal findings, or GPS coordinates.
 Return exactly one valid JSON object with these keys:
-dag_no, mouza, jl_no, khatian_no, total_area, recorded_area, current_owner,
+dag_no,dag_numbers mouza, jl_no, khatian_no, total_area, recorded_area, current_owner,
 lineage, lat, lng, status, status_bn, risk_score, message_bn.
 
 Rules:
 - dag_no: transcribe all legible dag numbers as a string; otherwise null.
+- dag_numbers: return all legible dag numbers as a JSON array of strings; otherwise [].
 - mouza: transcribe the visible mouza name; include district/upazila only if visible.
 - jl_no, khatian_no, total_area, recorded_area, current_owner: transcribe only if visible; otherwise null.
 - lineage: array of {"stage": "...", "owner": "...", "area": "..."} only if printed in the image; otherwise [].
@@ -161,6 +219,7 @@ Rules:
 
         defaults = {
             "dag_no": None,
+            "dag_numbers": [],
             "mouza": None,
             "jl_no": None,
             "khatian_no": None,
@@ -178,12 +237,33 @@ Rules:
         if not isinstance(parsed.get("lineage"), list):
             parsed["lineage"] = []
 
+        if not isinstance(parsed.get("dag_numbers"), list):
+            parsed["dag_numbers"] = []
+
+        if not parsed["dag_numbers"] and parsed.get("dag_no"):
+            parsed["dag_numbers"] = [parsed["dag_no"]]
+
+        if not parsed.get("dag_no") and parsed["dag_numbers"]:
+            parsed["dag_no"] = ", ".join(
+                str(number) for number in parsed["dag_numbers"]
+            )
+
         # Force non-verification status. OCR cannot confirm ownership or fraud.
         parsed["status"] = "Pending Verification"
         parsed["status_bn"] = "সরকারি রেকর্ড যাচাই হয়নি"
         parsed["risk_score"] = None
         parsed["lat"] = None
         parsed["lng"] = None
+
+        location = await lookup_mouza_location(parsed.get("mouza"))
+
+        if location:
+            parsed.update(location)
+        else:
+            parsed["location_precision"] = None
+            parsed["location_source"] = None
+            parsed["location_label"] = None
+
         parsed["is_scanned"] = True
         parsed["verification_source"] = "OCR only; no official land-record API connected"
         parsed["dynamic_geojson"] = empty_geojson()
