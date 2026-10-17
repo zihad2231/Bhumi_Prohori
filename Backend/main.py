@@ -115,8 +115,7 @@ def get_khatian_record(dag_no: str):
 async def scan_khatian_image(file: UploadFile = File(...)):
     """Read visible fields from a Khatian image; OCR is not official verification."""
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
-
+    model_name = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
     if not api_key:
         raise HTTPException(
             status_code=503,
