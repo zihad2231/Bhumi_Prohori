@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { MapContainer, TileLayer, GeoJSON, Marker, Popup, useMap } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  GeoJSON,
+  Marker,
+  Popup,
+  useMap,
+  useMapEvents,
+} from "react-leaflet";
 import L from "leaflet";
 import {
   ShieldCheck,
@@ -27,12 +35,17 @@ L.Icon.Default.mergeOptions({
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://bhumi-prohori.onrender.com";
 
-const PLOT_COORDS = {
-  "101": [23.8755, 90.3215],
-  "102": [23.8755, 90.3235],
-  "103": [23.8735, 90.3215],
-  "104": [23.8735, 90.3235],
-};
+const PLOT_COORDS = {}; // No demo Dag coordinates: real coordinates must be supplied or selected by the user.
+
+function MapClickSelector({ onLocationSelect }) {
+  useMapEvents({
+    click(event) {
+      onLocationSelect(event.latlng.lat, event.latlng.lng);
+    },
+  });
+
+  return null;
+}
 
 function MapController({ center, zoom }) {
   const map = useMap();
@@ -59,14 +72,18 @@ export default function App() {
   const [activeGeoData, setActiveGeoData] = useState(null);
   const [showOverlay, setShowOverlay] = useState(true);
   const [mapType, setMapType] = useState("hybrid");
-  const [selectedDag, setSelectedDag] = useState("101");
+  const [selectedDag, setSelectedDag] = useState(null);
   const [khatianInfo, setKhatianInfo] = useState(null);
   const [loading, setLoading] = useState(false);
   const [isCustomScan, setIsCustomScan] = useState(false);
   const [uploadedPreview, setUploadedPreview] = useState(null);
-  const [mapCenter, setMapCenter] = useState([23.8745, 90.3225]);
-  const [mapZoom, setMapZoom] = useState(17);
+  const [mapCenter, setMapCenter] = useState([23.6850, 90.3563]);
+  const [mapZoom, setMapZoom] = useState(7);
   const [userGps, setUserGps] = useState(null);
+  const [selectedLocation, setSelectedLocation] = useState(null);
+  const [latitudeInput, setLatitudeInput] = useState("");
+  const [longitudeInput, setLongitudeInput] = useState("");
+  const [coordinateError, setCoordinateError] = useState("");
 
   useEffect(() => {
     fetch(`${API_BASE}/api/mouza-map`)
@@ -102,10 +119,6 @@ export default function App() {
       });
   };
 
-  useEffect(() => {
-    handleSelectPredefinedDag("101");
-  }, []);
-
   // Upload Khatian Image -> Extract Real Info -> Track Location on Satellite Map
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
@@ -125,20 +138,66 @@ export default function App() {
         body: formData,
       });
       const data = await res.json();
+      if (!res.ok) {
+        setKhatianInfo({
+          is_scanned: false,
+          status: "Scan Failed",
+          status_bn: "খতিয়ান স্ক্যান করা যায়নি",
+          risk_score: null,
+          message_bn: data.detail || "OCR সার্ভার থেকে তথ্য পাওয়া যায়নি। Render backend logs পরীক্ষা করুন।",
+          dag_no: null,
+          mouza: null,
+          jl_no: null,
+          khatian_no: null,
+          total_area: null,
+          recorded_area: null,
+          current_owner: null,
+          lineage: [],
+          lat: null,
+          lng: null,
+        });
+        setActiveGeoData({ type: "FeatureCollection", features: [] });
+        return;
+      }
       setKhatianInfo(data);
 
-      // Automatically fly Satellite Map to the extracted Mouza GPS coordinates!
-      if (data.lat && data.lng) {
-        setMapCenter([Number(data.lat), Number(data.lng)]);
+      // OCR does not establish land location; only use coordinates if a trusted source explicitly supplies them.
+      if (
+        data.lat !== undefined && data.lat !== null &&
+        data.lng !== undefined && data.lng !== null &&
+        Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng)) &&
+        Number(data.lat) >= -90 && Number(data.lat) <= 90 &&
+        Number(data.lng) >= -180 && Number(data.lng) <= 180
+      ) {
+        const coords = [Number(data.lat), Number(data.lng)];
+        setMapCenter(coords);
         setMapZoom(17);
+        setSelectedLocation(coords);
+        setLatitudeInput(coords[0].toFixed(7));
+        setLongitudeInput(coords[1].toFixed(7));
       }
 
-      // Render dynamic plot boundaries for all extracted Dag numbers on the map
-      if (data.dynamic_geojson) {
-        setActiveGeoData(data.dynamic_geojson);
-      }
+      // Never treat OCR output as cadastral geometry. The backend currently returns no official boundaries.
+      setActiveGeoData({ type: "FeatureCollection", features: [] });
     } catch {
-      alert("সার্ভারের সাথে সংযোগ করা যাচ্ছে না। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।");
+      setKhatianInfo({
+        is_scanned: false,
+        status: "Scan Failed",
+        status_bn: "সার্ভারের সঙ্গে সংযোগ করা যায়নি",
+        risk_score: null,
+        message_bn: "নেটওয়ার্ক বা backend সংযোগে সমস্যা হয়েছে। Render-এর backend logs পরীক্ষা করে আবার চেষ্টা করুন।",
+        dag_no: null,
+        mouza: null,
+        jl_no: null,
+        khatian_no: null,
+        total_area: null,
+        recorded_area: null,
+        current_owner: null,
+        lineage: [],
+        lat: null,
+        lng: null,
+      });
+      setActiveGeoData({ type: "FeatureCollection", features: [] });
     } finally {
       setLoading(false);
       e.target.value = null;
@@ -154,6 +213,10 @@ export default function App() {
       (pos) => {
         const coords = [pos.coords.latitude, pos.coords.longitude];
         setUserGps(coords);
+        setSelectedLocation(coords);
+        setLatitudeInput(coords[0].toFixed(7));
+        setLongitudeInput(coords[1].toFixed(7));
+        setCoordinateError("");
         setMapCenter(coords);
         setMapZoom(18);
       },
@@ -161,6 +224,41 @@ export default function App() {
         alert("জিপিএস লোকেশন পাওয়া যায়নি। ব্রাউজারে Location Permission চালু করুন।");
       }
     );
+  };
+
+  const handleCoordinateSearch = (e) => {
+    e.preventDefault();
+
+    const latText = latitudeInput.trim();
+    const lngText = longitudeInput.trim();
+    const lat = Number(latText);
+    const lng = Number(lngText);
+
+    if (
+      !latText || !lngText ||
+      !Number.isFinite(lat) || !Number.isFinite(lng) ||
+      lat < -90 || lat > 90 || lng < -180 || lng > 180
+    ) {
+      setCoordinateError("সঠিক Latitude (-90 থেকে 90) এবং Longitude (-180 থেকে 180) লিখুন।");
+      return;
+    }
+
+    const coords = [lat, lng];
+    setCoordinateError("");
+    setSelectedLocation(coords);
+    setLatitudeInput(lat.toFixed(7));
+    setLongitudeInput(lng.toFixed(7));
+    setMapCenter(coords);
+    setMapZoom(18);
+  };
+
+  const handleMapLocationSelect = (lat, lng) => {
+    const coords = [lat, lng];
+    setSelectedLocation(coords);
+    setLatitudeInput(lat.toFixed(7));
+    setLongitudeInput(lng.toFixed(7));
+    setCoordinateError("");
+    setMapCenter(coords);
   };
 
   const plotStyle = (feature) => {
@@ -249,7 +347,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs md:text-sm text-emerald-950 font-semibold">
           <div className="flex flex-wrap items-center gap-3">
             <span className="bg-emerald-700 text-white px-2.5 py-0.5 rounded-md font-bold">সহজ নির্দেশনা:</span>
-            <span>১. যেকোনো খতিয়ানের ছবি আপলোড করলে এআই স্বয়ংক্রিয়ভাবে মৌজা ও দাগ নম্বর শনাক্ত করে স্যাটেলাইট ম্যাপে ট্র্যাক করবে</span>
+            <span>১. যেকোনো খতিয়ানের ছবি আপলোড করলে এআই দৃশ্যমান তথ্য পড়ার চেষ্টা করবে; প্রকৃত জমির অবস্থান আলাদাভাবে যাচাই করতে হবে</span>
           </div>
           <span className="text-emerald-800 font-bold flex items-center gap-1">
             <PhoneCall className="w-3.5 h-3.5" /> ভূমি সহায়তা হটলাইন: ১৬১২২
@@ -262,13 +360,9 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 py-3.5 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className="font-bold text-slate-800 flex items-center gap-1.5 text-base">
-              <Search className="w-5 h-5 text-emerald-600" /> নমুনা দাগ নম্বর:
+              <Search className="w-5 h-5 text-emerald-600" /> দাগ নম্বর:
             </span>
             {[
-              { id: "101", label: "দাগ নং ১০১ (নিরাপদ)" },
-              { id: "102", label: "দাগ নং ১০২ (জালিয়াতি সতর্কতা!)" },
-              { id: "103", label: "দাগ নং ১০৩ (নিরাপদ)" },
-              { id: "104", label: "দাগ নং ১০৪ (নিরাপদ)" },
             ].map((item) => (
               <button
                 key={item.id}
@@ -287,6 +381,42 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            <form
+              onSubmit={handleCoordinateSearch}
+              className="flex flex-wrap items-end gap-2 rounded-xl border border-blue-200 bg-blue-50 p-2"
+            >
+              <label className="text-xs font-bold text-slate-700">
+                Latitude
+                <input
+                  type="number"
+                  step="any"
+                  value={latitudeInput}
+                  onChange={(e) => setLatitudeInput(e.target.value)}
+                  placeholder="23.8103"
+                  className="mt-1 block w-28 rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-normal"
+                  required
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-700">
+                Longitude
+                <input
+                  type="number"
+                  step="any"
+                  value={longitudeInput}
+                  onChange={(e) => setLongitudeInput(e.target.value)}
+                  placeholder="90.4125"
+                  className="mt-1 block w-28 rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-normal"
+                  required
+                />
+              </label>
+              <button
+                type="submit"
+                className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700"
+              >
+                অবস্থান দেখুন
+              </button>
+            </form>
+
             <button
               onClick={handleLocateMe}
               className="px-3.5 py-2 rounded-xl font-bold text-xs md:text-sm flex items-center gap-1.5 border bg-blue-50 border-blue-600 text-blue-800 hover:bg-blue-100 transition shadow-sm"
@@ -310,6 +440,11 @@ export default function App() {
               {showOverlay ? "মৌজা দাগ লুকান" : "মৌজা দাগ দেখুন"}
             </button>
           </div>
+          {coordinateError && (
+            <div className="max-w-7xl mx-auto w-full px-4 pb-3 text-sm font-semibold text-red-600" role="alert">
+              {coordinateError}
+            </div>
+          )}
         </div>
       </div>
 
@@ -321,10 +456,10 @@ export default function App() {
             <div>
               <h2 className="font-bold text-lg flex items-center gap-2">
                 <MapPin className="w-5 h-5 text-emerald-400" />
-                স্যাটেলাইট ও মৌজা ম্যাপ ভিউ ({khatianInfo?.mouza || "আশুলিয়া মৌজা"})
+                স্যাটেলাইট ম্যাপ ভিউ ({khatianInfo?.mouza || "মৌজা শনাক্ত হয়নি"})
               </h2>
               <p className="text-xs text-slate-300">
-                খতিয়ান আপলোড করলে স্বয়ংক্রিয়ভাবে সংশ্লিষ্ট জেলা ও মৌজার স্যাটেলাইট ভিউ ট্র্যাক করা হয়
+                ম্যাপের অবস্থান আলাদাভাবে নির্বাচন করতে হবে; OCR নিজে জমির GPS বা সীমানা নিশ্চিত করে না
               </p>
             </div>
             <div className="flex gap-3 text-xs font-bold bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
@@ -345,6 +480,7 @@ export default function App() {
               style={{ height: "100%", width: "100%" }}
             >
               <MapController center={mapCenter} zoom={mapZoom} />
+              <MapClickSelector onLocationSelect={handleMapLocationSelect} />
 
               {mapType === "hybrid" ? (
                 <TileLayer
@@ -374,9 +510,9 @@ export default function App() {
                   <Popup>
                     <strong>মৌজা: {khatianInfo.mouza}</strong>
                     <br />
-                    খতিয়ান নং: {khatianInfo.khatian_no}
+                    খতিয়ান নং: {khatianInfo.khatian_no || "ছবিতে শনাক্ত হয়নি"}
                     <br />
-                    দাগ নং: {khatianInfo.dag_no}
+                    দাগ নং: {khatianInfo.dag_no || "ছবিতে শনাক্ত হয়নি"}
                   </Popup>
                 </Marker>
               )}
@@ -386,33 +522,77 @@ export default function App() {
                   <Popup>আপনার বর্তমান জিপিএস অবস্থান</Popup>
                 </Marker>
               )}
+
+              {selectedLocation && (
+                <Marker position={selectedLocation}>
+                  <Popup>
+                    <strong>নির্বাচিত অবস্থান</strong>
+                    <br />
+                    Latitude: {selectedLocation[0].toFixed(7)}
+                    <br />
+                    Longitude: {selectedLocation[1].toFixed(7)}
+                    <br />
+                    <span>এই অবস্থান সরকারি জমির সীমানা হিসেবে যাচাই করা হয়নি।</span>
+                  </Popup>
+                </Marker>
+              )}
             </MapContainer>
           </div>
 
           <div className="p-3 bg-slate-50 border-t text-xs text-slate-600 flex flex-wrap justify-between items-center gap-2">
             <span>
-              <strong>জিপিএস কোঅর্ডিনেট:</strong> {mapCenter[0].toFixed(4)}° N, {mapCenter[1].toFixed(4)}° E
+              <strong>ম্যাপের কেন্দ্রীয় কোঅর্ডিনেট:</strong> {mapCenter[0].toFixed(7)}, {mapCenter[1].toFixed(7)}
+              {selectedLocation && (
+                <span className="ml-2 text-blue-700 font-semibold">
+                  নির্বাচিত: {selectedLocation[0].toFixed(7)}, {selectedLocation[1].toFixed(7)}
+                </span>
+              )}
             </span>
             <button
-              onClick={() => handleSelectPredefinedDag("101")}
+              onClick={() => {
+                const coords = [23.6850, 90.3563];
+                setMapCenter(coords);
+                setMapZoom(7);
+                setSelectedLocation(null);
+                setUserGps(null);
+                setLatitudeInput("");
+                setLongitudeInput("");
+                setCoordinateError("");
+                setKhatianInfo(null);
+                setSelectedDag(null);
+                setIsCustomScan(false);
+                setUploadedPreview(null);
+                setActiveGeoData({ type: "FeatureCollection", features: [] });
+              }}
               className="font-bold text-emerald-700 hover:underline flex items-center gap-1"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> ডিফল্ট মৌজায় ফিরুন
+              <RefreshCw className="w-3.5 h-3.5" /> ম্যাপ রিসেট করুন
             </button>
           </div>
         </div>
 
         {/* Right Column: AI Khatian Verification Report */}
         <div className="lg:col-span-5 flex flex-col gap-5">
-          {loading || !khatianInfo ? (
+          {loading ? (
             <div className="bg-white p-10 rounded-2xl shadow text-center border border-emerald-200 flex flex-col items-center justify-center gap-3 min-h-[340px]">
               <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
               <p className="text-xl font-bold text-emerald-800 animate-pulse">
-                এআই (AI) আপনার খতিয়ান স্ক্যান করছে এবং স্যাটেলাইট ম্যাপে মৌজাটি খুঁজছে...
+                এআই (AI) আপনার খতিয়ানের ছবিতে দৃশ্যমান তথ্য পড়ার চেষ্টা করছে...
               </p>
               <p className="text-xs text-slate-500">
-                সকল দাগ নম্বর, মালিকের নাম ও জমির পরিমাণ বিশ্লেষণ করা হচ্ছে (৩-৬ সেকেন্ড)
+                OCR ফলাফল সরকারি রেকর্ড বা জমির সীমানা যাচাই করে না।
               </p>
+            </div>
+          ) : !khatianInfo ? (
+            <div className="bg-white p-8 rounded-2xl shadow-md border border-amber-300 min-h-[300px] flex flex-col justify-center gap-3">
+              <div className="flex items-center gap-3 text-amber-800">
+                <AlertTriangle className="w-8 h-8 shrink-0" />
+                <h3 className="text-xl font-extrabold">সরকারি খতিয়ান ডেটাবেস সংযুক্ত নয়</h3>
+              </div>
+              <p className="text-sm leading-6 text-slate-700">
+                খতিয়ানের ছবি আপলোড করলে দৃশ্যমান তথ্য OCR দিয়ে পড়ার চেষ্টা করা হবে। এই অ্যাপ এখনো সরকারি রেকর্ড, মালিকানা বা জমির সীমানা যাচাই করতে পারে না।
+              </p>
+              <p className="text-xs text-slate-500">ম্যাপে ক্লিক করে কোনো অবস্থান বেছে নিতে পারেন; সেটি সরকারি জমির সীমানা হিসেবে গণ্য হবে না।</p>
             </div>
           ) : (
             <>
@@ -429,7 +609,7 @@ export default function App() {
                         লাইভ এআই ওসিআর ও স্যাটেলাইট ট্র্যাকিং
                       </span>
                       <h4 className="font-extrabold text-sm text-slate-900 mt-1">
-                        মৌজা: {khatianInfo.mouza} {khatianInfo.jl_no ? `(জে.এল নং: ${khatianInfo.jl_no})` : ""}
+                        মৌজা: {khatianInfo.mouza || "ছবিতে শনাক্ত হয়নি"} {khatianInfo.jl_no ? `(জে.এল নং: ${khatianInfo.jl_no})` : ""}
                       </h4>
                     </div>
                   </div>
@@ -459,9 +639,9 @@ export default function App() {
                           isSafe ? "bg-emerald-200 text-emerald-900" : "bg-red-200 text-red-900"
                         }`}
                       >
-                        {isCustomScan ? "এআই ওসিআর স্ক্যান রিপোর্ট" : "এআই যাচাইকৃত ফলাফল"}
+                        {isCustomScan ? "OCR স্ক্যান রিপোর্ট · সরকারি যাচাই হয়নি" : "রেকর্ড রিপোর্ট · সরকারি যাচাই হয়নি"}
                       </span>
-                      <span className="text-xs font-bold">ঝুঁকি: {khatianInfo.risk_score}</span>
+                      <span className="text-xs font-bold">ঝুঁকি: {khatianInfo.risk_score ?? "মূল্যায়ন করা হয়নি"}</span>
                     </div>
                     <h3 className="text-xl md:text-2xl font-extrabold mt-1.5">{khatianInfo.status_bn}</h3>
                     <p className="text-sm mt-2 font-medium leading-relaxed bg-white/80 p-2.5 rounded-lg border border-black/5">
@@ -489,22 +669,22 @@ export default function App() {
                   <div className="col-span-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <p className="text-slate-500 text-xs font-medium">মৌজা ও অন্তর্ভুক্ত দাগ নম্বরসমূহ</p>
                     <p className="font-extrabold text-sm md:text-base text-slate-900 mt-0.5">
-                      দাগ নং: {khatianInfo.dag_no}
+                      দাগ নং: {khatianInfo.dag_no || "ছবিতে শনাক্ত হয়নি"}
                     </p>
                     <p className="text-xs text-emerald-700 font-bold mt-0.5">
-                      মৌজা: {khatianInfo.mouza} {khatianInfo.jl_no ? `| জে.এল নং: ${khatianInfo.jl_no}` : ""}
+                      মৌজা: {khatianInfo.mouza || "ছবিতে শনাক্ত হয়নি"} {khatianInfo.jl_no ? `| জে.এল নং: ${khatianInfo.jl_no}` : ""}
                     </p>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <p className="text-slate-500 text-xs font-medium">খতিয়ান নম্বর</p>
                     <p className="font-extrabold text-base text-slate-900 mt-0.5">
-                      {khatianInfo.khatian_no}
+                      {khatianInfo.khatian_no || "ছবিতে শনাক্ত হয়নি"}
                     </p>
                   </div>
                   <div className="bg-emerald-50/60 p-3 rounded-xl border border-emerald-200">
                     <p className="text-emerald-800 text-xs font-semibold">সর্বমোট জমির পরিমাণ</p>
                     <p className="font-extrabold text-base text-emerald-700 mt-0.5">
-                      {khatianInfo.total_area}
+                      {khatianInfo.total_area || "ছবিতে শনাক্ত হয়নি"}
                     </p>
                   </div>
                 </div>
@@ -513,11 +693,11 @@ export default function App() {
                   <span className="text-sm font-medium text-slate-600">
                     মালিকের নাম:{" "}
                     <strong className="text-slate-900 font-extrabold">
-                      {khatianInfo.current_owner}
+                      {khatianInfo.current_owner || "ছবিতে শনাক্ত হয়নি"}
                     </strong>
                   </span>
-                  <span className="flex items-center gap-1 text-xs font-bold text-emerald-700 shrink-0">
-                    <CheckCircle2 className="w-4 h-4" /> যাচাইকৃত
+                  <span className="flex items-center gap-1 text-xs font-bold text-amber-700 shrink-0">
+                    <AlertTriangle className="w-4 h-4" /> সরকারি যাচাই হয়নি
                   </span>
                 </div>
               </div>

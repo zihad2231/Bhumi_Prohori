@@ -1,116 +1,148 @@
+"""
+BhumiProhori CV engine.
+
+Important:
+- This module detects candidate boundaries in an image using OpenCV.
+- Pixel coordinates are NOT GPS coordinates.
+- It does not determine real Dag numbers, legal boundaries, ownership, or verification status.
+- GeoJSON is deliberately empty unless reliable georeferencing is supplied by a future, separate workflow.
+"""
+
+from pathlib import Path
+import json
+
 import cv2
 import numpy as np
-import json
-import os
 
-# Base GPS Coordinates for Daffodil Smart City (Ashulia) area (Latitude, Longitude)
-BASE_LAT = 23.8765
-BASE_LNG = 90.3201
 
 def create_dummy_mouza_map(filepath="processed_data/sample_mouza.png"):
-    """Generates a synthetic Mouza map image with 4 land plots for testing."""
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    # Create a white canvas (600x600 pixels)
-    img = np.ones((600, 600, 3), dtype=np.uint8) * 255
+    """
+    Create a clearly synthetic image for local testing only.
+    Never use this generated image as a real cadastral/mouza map.
+    """
+    output_path = Path(filepath)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Define 4 polygon land plots (Dag) with black boundaries
+    img = np.full((600, 600, 3), 255, dtype=np.uint8)
     plots = [
-        [(50, 50), (280, 50), (270, 260), (50, 250)],    # Plot/Dag No 101
-        [(290, 50), (550, 60), (540, 270), (280, 260)],  # Plot/Dag No 102
-        [(50, 270), (270, 280), (260, 540), (60, 530)],  # Plot/Dag No 103
-        [(280, 280), (540, 290), (530, 550), (275, 540)] # Plot/Dag No 104
+        [(50, 50), (280, 50), (270, 260), (50, 250)],
+        [(290, 50), (550, 60), (540, 270), (280, 260)],
+        [(50, 270), (270, 280), (260, 540), (60, 530)],
+        [(280, 280), (540, 290), (530, 550), (275, 540)],
     ]
 
-    for poly in plots:
-        pts = np.array(poly, np.int32).reshape((-1, 1, 2))
-        cv2.polylines(img, [pts], isClosed=True, color=(0, 0, 0), thickness=3)
+    for index, polygon in enumerate(plots, start=1):
+        points = np.array(polygon, dtype=np.int32).reshape((-1, 1, 2))
+        cv2.polylines(img, [points], isClosed=True, color=(0, 0, 0), thickness=3)
+        cv2.putText(
+            img, f"SAMPLE {index}",
+            (polygon[0][0] + 8, polygon[0][1] + 24),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (100, 100, 100), 1, cv2.LINE_AA
+        )
 
-    cv2.imwrite(filepath, img)
-    return filepath
+    if not cv2.imwrite(str(output_path), img):
+        raise OSError(f"Could not write sample image: {output_path}")
+
+    return str(output_path)
+
 
 def process_mouza_map(image_path: str, output_dir="processed_data"):
-    """Detects plot boundaries from a Mouza map using OpenCV and exports GeoJSON."""
-    os.makedirs(output_dir, exist_ok=True)
-    
-    img = cv2.imread(image_path)
-    if img is None:
+    """
+    Detect candidate contours in a supplied image.
+
+    The result stores image pixel polygons in candidate_boundaries.json.
+    It does NOT convert pixels into GPS and returns an empty GeoJSON overlay,
+    because georeferencing/cadastral control points are not available.
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    image = cv2.imread(str(image_path))
+    if image is None:
         raise ValueError("Input image not found or unreadable.")
 
-    # 1. Convert to Grayscale and apply Gaussian Blur for noise reduction
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
-    # 2. Canny Edge Detection and Morphological Closing
     edges = cv2.Canny(blurred, 50, 150)
-    kernel = np.ones((3, 3), np.uint8)
+    kernel = np.ones((3, 3), dtype=np.uint8)
     closed_edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
 
-    # 3. Extract external contours representing land plots
-    contours, _ = cv2.findContours(closed_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(
+        closed_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
 
-    output_img = img.copy()
-    features = []
-    dag_start = 101
+    preview = image.copy()
+    candidates = []
 
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        # Filter out small noise artifacts and retain valid land plots
-        if area > 5000:
-            # Douglas-Peucker algorithm to approximate contour into a clean polygon
-            epsilon = 0.02 * cv2.arcLength(cnt, True)
-            approx = cv2.approxPolyDP(cnt, epsilon, True)
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        if area < 5000:
+            continue
 
-            # Draw green boundary on the output image for visual verification
-            cv2.drawContours(output_img, [approx], -1, (0, 180, 0), 3)
+        epsilon = 0.02 * cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, epsilon, True)
+        if len(approx) < 3:
+            continue
 
-            # Transform pixel coordinates into GPS (Lat/Lng) GeoJSON coordinates
-            geo_coords = []
-            for pt in approx:
-                px, py = pt[0]
-                lng = BASE_LNG + (px * 0.000008)
-                lat = BASE_LAT - (py * 0.000008)
-                geo_coords.append([round(lng, 6), round(lat, 6)])
-            
-            # Close the polygon ring by repeating the first coordinate at the end
-            geo_coords.append(geo_coords[0])
+        pixel_points = [[int(point[0][0]), int(point[0][1])] for point in approx]
+        cv2.drawContours(preview, [approx], -1, (0, 180, 0), 2)
 
-            features.append({
-                "type": "Feature",
-                "properties": {
-                    "dag_no": str(dag_start),
-                    "estimated_area_pixel": area,
-                    "status": "Verified" if dag_start != 102 else "Disputed (Over-mutation)"
-                },
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [geo_coords]
-                }
-            })
-            dag_start += 1
+        candidates.append({
+            "candidate_id": len(candidates) + 1,
+            "pixel_area": area,
+            "pixel_coordinates": pixel_points,
+            "note": "Candidate image contour only; not a verified plot boundary."
+        })
 
-    # 4. Save processed image and GeoJSON output
-    processed_img_path = os.path.join(output_dir, "detected_plots.png")
-    geojson_path = os.path.join(output_dir, "mouza_overlay.geojson")
+    preview_path = output_path / "detected_plots.png"
+    if not cv2.imwrite(str(preview_path), preview):
+        raise OSError(f"Could not write preview image: {preview_path}")
 
-    cv2.imwrite(processed_img_path, output_img)
+    candidates_path = output_path / "candidate_boundaries.json"
+    with candidates_path.open("w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "source_image": str(image_path),
+                "coordinate_system": "image_pixels",
+                "georeferenced": False,
+                "candidates": candidates,
+                "warning": (
+                    "These are image-processing candidates only. "
+                    "No GPS, Dag number, ownership, or legal verification is inferred."
+                ),
+            },
+            handle,
+            ensure_ascii=False,
+            indent=2,
+        )
 
+    # Keep the path expected by the existing main.py, but do not invent GPS polygons.
+    geojson_path = output_path / "mouza_overlay.geojson"
     geojson_data = {
         "type": "FeatureCollection",
-        "features": features
+        "features": [],
+        "metadata": {
+            "georeferenced": False,
+            "message": (
+                "No verified georeferencing data supplied; map overlay intentionally empty."
+            ),
+        },
     }
-
-    with open(geojson_path, "w", encoding="utf-8") as f:
-        json.dump(geojson_data, f, indent=2, ensure_ascii=False)
+    with geojson_path.open("w", encoding="utf-8") as handle:
+        json.dump(geojson_data, handle, ensure_ascii=False, indent=2)
 
     return {
-        "total_plots_detected": len(features),
-        "processed_image": processed_img_path,
-        "geojson_file": geojson_path,
-        "geojson": geojson_data
+        "total_candidate_boundaries": len(candidates),
+        "processed_image": str(preview_path),
+        "candidate_boundaries_file": str(candidates_path),
+        "geojson_file": str(geojson_path),
+        "geojson": geojson_data,
+        "georeferenced": False,
     }
+
 
 if __name__ == "__main__":
     sample_img = create_dummy_mouza_map()
     result = process_mouza_map(sample_img)
-    print(f"Success! Total plots detected: {result['total_plots_detected']}")
-    print(f"GeoJSON saved to: {result['geojson_file']}")
+    print(f"Sample image processed. Candidate contours: {result['total_candidate_boundaries']}")
+    print("No GPS polygons were created because georeferencing data is unavailable.")
