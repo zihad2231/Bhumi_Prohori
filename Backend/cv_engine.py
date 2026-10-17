@@ -1,5 +1,5 @@
 """
-BhumiProhori CV engine.
+EasyLand AI CV engine.
 
 Important:
 - This module detects candidate boundaries in an image using OpenCV.

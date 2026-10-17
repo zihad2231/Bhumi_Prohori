@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -18,7 +18,6 @@ import {
   GitBranch,
   Search,
   Printer,
-  CheckCircle2,
   Sparkles,
   PhoneCall,
   Layers,
@@ -84,6 +83,7 @@ export default function App() {
   const [latitudeInput, setLatitudeInput] = useState("");
   const [longitudeInput, setLongitudeInput] = useState("");
   const [coordinateError, setCoordinateError] = useState("");
+  const scanRequestRef = useRef({ id: 0, controller: null });
 
   useEffect(() => {
     fetch(`${API_BASE}/api/mouza-map`)
@@ -104,9 +104,7 @@ export default function App() {
     }
     if (PLOT_COORDS[dagId]) {
       setMapCenter(PLOT_COORDS[dagId]);
-      setMapZoom(
-  data.location_precision === "approximate" ? 14 : 17
-);
+      setMapZoom(17);
     }
 
     setLoading(true);
@@ -123,12 +121,24 @@ export default function App() {
 
   // Upload Khatian Image -> Extract Real Info -> Track Location on Satellite Map
   const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
+    const input = e.currentTarget;
+    const file = input.files[0];
     if (!file) return;
 
+    // Clear immediately so selecting the same image starts a new change event.
+    input.value = "";
+    scanRequestRef.current.controller?.abort();
+    const requestId = scanRequestRef.current.id + 1;
+    const controller = new AbortController();
+    scanRequestRef.current = { id: requestId, controller };
+
     const previewUrl = URL.createObjectURL(file);
+    if (uploadedPreview) URL.revokeObjectURL(uploadedPreview);
     setUploadedPreview(previewUrl);
     setIsCustomScan(true);
+    setSelectedDag(null);
+    setSelectedLocation(null);
+    setCoordinateError("");
     setLoading(true);
 
     const formData = new FormData();
@@ -138,8 +148,10 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/scan-khatian`, {
         method: "POST",
         body: formData,
+        signal: controller.signal,
       });
       const data = await res.json();
+      if (requestId !== scanRequestRef.current.id) return;
       if (!res.ok) {
         setKhatianInfo({
           is_scanned: false,
@@ -163,7 +175,13 @@ export default function App() {
       }
       setKhatianInfo(data);
 
-      // OCR does not establish land location; only use coordinates if a trusted source explicitly supplies them.
+      if (data.dynamic_geojson?.features?.length) {
+        setActiveGeoData(data.dynamic_geojson);
+      } else {
+        setActiveGeoData({ type: "FeatureCollection", features: [] });
+      }
+
+      // A mouza geocode is an approximate area focus, not a verified cadastral boundary.
       if (
         data.lat !== undefined && data.lat !== null &&
         data.lng !== undefined && data.lng !== null &&
@@ -173,17 +191,14 @@ export default function App() {
       ) {
         const coords = [Number(data.lat), Number(data.lng)];
         setMapCenter(coords);
-        setMapZoom(
-  data.location_precision === "approximate" ? 14 : 17
-);
+        setMapZoom(data.location_precision === "approximate" ? 14 : 17);
         setSelectedLocation(coords);
         setLatitudeInput(coords[0].toFixed(7));
         setLongitudeInput(coords[1].toFixed(7));
       }
 
-      // Never treat OCR output as cadastral geometry. The backend currently returns no official boundaries.
-      setActiveGeoData({ type: "FeatureCollection", features: [] });
-    } catch {
+    } catch (error) {
+      if (error.name === "AbortError" || requestId !== scanRequestRef.current.id) return;
       setKhatianInfo({
         is_scanned: false,
         status: "Scan Failed",
@@ -203,8 +218,10 @@ export default function App() {
       });
       setActiveGeoData({ type: "FeatureCollection", features: [] });
     } finally {
-      setLoading(false);
-      e.target.value = null;
+      if (requestId === scanRequestRef.current.id) {
+        setLoading(false);
+        scanRequestRef.current.controller = null;
+      }
     }
   };
 
@@ -328,9 +345,9 @@ const handleMapLocationSelect = (lat, lng) => {
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <h1 className="text-2xl md:text-3xl font-extrabold tracking-wide text-white">ভূমি-প্রহরী এআই</h1>
+                <h1 className="text-2xl md:text-3xl font-extrabold tracking-wide text-white">EasyLand AI</h1>
                 <span className="text-xs bg-amber-400/20 text-amber-300 border border-amber-400/40 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" /> BhumiProhori AI
+                  <Sparkles className="w-3 h-3" /> EasyLand AI
                 </span>
               </div>
               <p className="text-xs md:text-sm text-emerald-200 font-medium">
@@ -491,9 +508,12 @@ const handleMapLocationSelect = (lat, lng) => {
 
               {mapType === "hybrid" ? (
                 <TileLayer
-                  url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
-                  attribution="&copy; Google Satellite Hybrid"
-                  maxZoom={20}
+                  url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                  attribution="&copy; Esri, Maxar, Earthstar Geographics"
+                  maxZoom={19}
+                  eventHandlers={{
+                    tileerror: () => setMapType("street"),
+                  }}
                 />
               ) : (
                 <TileLayer

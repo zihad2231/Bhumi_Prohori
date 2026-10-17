@@ -1,1 +1,1 @@
-# Bhumi_Prohori
+# EasyLand AI

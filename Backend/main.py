@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 
 load_dotenv()
 
-app = FastAPI(title="BhumiProhori AI Service", docs_url=None, redoc_url=None)
+app = FastAPI(title="EasyLand AI Service", docs_url=None, redoc_url=None)
 
 # Vite frontend can call this API. Credentials are not needed for this API.
 app.add_middleware(
@@ -44,7 +44,7 @@ def _lookup_mouza_location(query):
     url = f"https://nominatim.openstreetmap.org/search?{params}"
     request = Request(
         url,
-        headers={"User-Agent": "BhumiProhori/1.0"}
+        headers={"User-Agent": "EasyLandAI/1.0"}
     )
 
     try:
@@ -64,7 +64,7 @@ def _lookup_mouza_location(query):
             "location_label": result.get("display_name")
         }
 
-    except Exception:
+    except Exception as error:
         print(f"MOUZA LOCATION ERROR: {type(error).__name__}: {error}")
         return None
 
@@ -88,7 +88,7 @@ async def lookup_mouza_location(mouza, upazila=None, district=None):
 def health_check():
     return {
         "status": "online",
-        "service": "BhumiProhori AI",
+        "service": "EasyLand AI",
         "ocr_configured": bool(os.getenv("GEMINI_API_KEY", "").strip()),
         "official_land_record_verification": "not_configured",
     }
@@ -116,7 +116,7 @@ def get_khatian_record(dag_no: str):
 async def scan_khatian_image(file: UploadFile = File(...)):
     """Read visible fields from a Khatian image; OCR is not official verification."""
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    model_name = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
     if not api_key:
         raise HTTPException(
             status_code=503,
@@ -169,13 +169,14 @@ You are an OCR assistant for Bangladeshi land Khatian/Porcha documents.
 Read only text that is visible in the uploaded image. Do not invent or infer
 missing values, owner names, area, historical ownership, legal findings, or GPS coordinates.
 Return exactly one valid JSON object with these keys:
-dag_no,dag_numbers mouza, jl_no, khatian_no, total_area, recorded_area, current_owner,
+dag_no, dag_numbers, mouza, upazila, district, jl_no, khatian_no, total_area, recorded_area, current_owner,
 lineage, lat, lng, status, status_bn, risk_score, message_bn.
 
 Rules:
 - dag_no: transcribe all legible dag numbers as a string; otherwise null.
 - dag_numbers: return all legible dag numbers as a JSON array of strings; otherwise [].
 - mouza: transcribe the visible mouza name; include district/upazila only if visible.
+- upazila and district: transcribe only when visibly printed in the image; otherwise null.
 - jl_no, khatian_no, total_area, recorded_area, current_owner: transcribe only if visible; otherwise null.
 - lineage: array of {"stage": "...", "owner": "...", "area": "..."} only if printed in the image; otherwise [].
 - lat and lng must always be null. Do not infer coordinates from text or image.
@@ -187,17 +188,33 @@ Rules:
 """
 
         client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=model_name,
-            contents=[
-                types.Part.from_bytes(data=contents, mime_type=file.content_type),
-                prompt,
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.1,
-            ),
+        request_contents = [
+            types.Part.from_bytes(data=contents, mime_type=file.content_type),
+            prompt,
+        ]
+        request_config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.1,
         )
+        models_to_try = list(dict.fromkeys([model_name, "gemini-2.5-flash"]))
+        response = None
+        last_model_error = None
+        for candidate_model in models_to_try:
+            try:
+                response = client.models.generate_content(
+                    model=candidate_model,
+                    contents=request_contents,
+                    config=request_config,
+                )
+                model_name = candidate_model
+                break
+            except Exception as model_error:
+                last_model_error = model_error
+                if "404" not in str(model_error) and "NOT_FOUND" not in str(model_error):
+                    raise
+
+        if response is None:
+            raise last_model_error or ValueError("No Gemini model was available.")
 
         raw_text = (response.text or "").strip()
         if not raw_text:
@@ -221,6 +238,8 @@ Rules:
             "dag_no": None,
             "dag_numbers": [],
             "mouza": None,
+            "upazila": None,
+            "district": None,
             "jl_no": None,
             "khatian_no": None,
             "total_area": None,
@@ -255,7 +274,11 @@ Rules:
         parsed["lat"] = None
         parsed["lng"] = None
 
-        location = await lookup_mouza_location(parsed.get("mouza"))
+        location = await lookup_mouza_location(
+            parsed.get("mouza"),
+            parsed.get("upazila"),
+            parsed.get("district"),
+        )
 
         if location:
             parsed.update(location)
